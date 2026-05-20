@@ -1,81 +1,76 @@
-import { DaoLayout } from "@/components/dao/DaoLayout";
-import { useTreasuryBalance, useDaoMission, useAllProposals, useScoreThreshold } from "@/hooks/useGrantAllocator";
 import { Link } from "react-router-dom";
+import { DaoLayout } from "@/components/dao/DaoLayout";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Shield, Zap, Users, TrendingUp } from "lucide-react";
+import { useAllProposals, useDaoMission, usePassedScreeningProposals, useTreasurySummary } from "@/hooks/useGrantAllocator";
+
+const formatUsd = (cents: number) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(cents / 100);
 
 export default function LandingPage() {
-  const { data: treasury = 0 } = useTreasuryBalance();
-  const { data: mission = "" } = useDaoMission();
+  const { data: mission } = useDaoMission();
+  const { data: treasury } = useTreasurySummary();
   const { data: proposals = [] } = useAllProposals();
-  const { data: threshold = 70 } = useScoreThreshold();
-
-  const approved = proposals.filter(p => p.status === "APPROVED").length;
-  const totalDisbursed = proposals.filter(p => p.executed).reduce((sum, p) => sum + p.requested_amount, 0);
+  const { data: passedQueue = [] } = usePassedScreeningProposals();
 
   return (
     <DaoLayout>
-      {/* Hero */}
-      <div className="text-center mb-16 animate-fade-in">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm mb-6">
-          <Shield className="w-4 h-4" /> AI-Powered Grant Governance
-        </div>
-        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-6 leading-tight">
-          Grant Allocator{" "}
-          <span className="gradient-text">DAO</span>
-        </h1>
-        <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto mb-8">
-          {mission || "A shared grant pool where AI evaluates proposals against the DAO mission, and human members vote on the best ones."}
-        </p>
-        <div className="flex flex-wrap items-center justify-center gap-4">
-          <Link to="/submit">
-            <Button className="bg-primary hover:bg-primary/90 text-primary-foreground gap-2 h-12 px-6 text-base">
-              Submit Proposal <ArrowRight className="w-4 h-4" />
-            </Button>
-          </Link>
-          <Link to="/proposals">
-            <Button variant="outline" className="gap-2 h-12 px-6 text-base border-border hover:border-primary/30">
-              View Proposals
-            </Button>
-          </Link>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-16">
-        {[
-          { label: "Treasury Balance", value: `${treasury.toLocaleString()} GEN`, icon: TrendingUp },
-          { label: "Total Proposals", value: proposals.length, icon: Zap },
-          { label: "Approved", value: approved, icon: Shield },
-          { label: "Total Disbursed", value: `${totalDisbursed.toLocaleString()} GEN`, icon: Users },
-        ].map((stat) => (
-          <div key={stat.label} className="glass-card p-5 text-center animate-slide-up">
-            <stat.icon className="w-5 h-5 text-primary mx-auto mb-2" />
-            <div className="text-2xl font-bold text-foreground">{stat.value}</div>
-            <div className="text-xs text-muted-foreground mt-1">{stat.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* How it works */}
-      <div className="glass-card p-8 animate-fade-in">
-        <h2 className="text-2xl font-bold mb-6 text-center">How It Works</h2>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          {[
-            { step: "1", title: "Submit", desc: "Anyone can submit a funding proposal with project details and budget." },
-            { step: "2", title: "AI Evaluates", desc: `The AI scores proposals on Impact, Feasibility, and Alignment. Below ${threshold}/100 are filtered out.` },
-            { step: "3", title: "DAO Votes", desc: "Qualified proposals go to DAO members for voting with AI recommendations visible." },
-            { step: "4", title: "Funds Released", desc: "Approved proposals automatically receive funding from the treasury." },
-          ].map((item) => (
-            <div key={item.step} className="text-center">
-              <div className="w-10 h-10 rounded-full bg-primary/20 text-primary font-bold flex items-center justify-center mx-auto mb-3">
-                {item.step}
-              </div>
-              <h3 className="font-semibold mb-2 text-foreground">{item.title}</h3>
-              <p className="text-sm text-muted-foreground">{item.desc}</p>
+      <div className="space-y-8">
+        <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="ops-shell">
+            <div className="ops-chip">AI + Committee Grants</div>
+            <h1 className="mt-5 max-w-4xl text-5xl leading-none sm:text-6xl">
+              Grants that screen with market intelligence, then release in milestone-linked USDC tranches.
+            </h1>
+            <p className="mt-6 max-w-2xl text-base leading-8 text-muted-foreground">
+              CryptoRank-style market context, team due diligence, and detailed AI scoring narrow the queue before the
+              committee ever votes. Approved grants move from GenLayer governance into the Arc treasury rail.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Link to="/submit">
+                <Button className="rounded-full">Apply for funding</Button>
+              </Link>
+              <Link to="/vote">
+                <Button variant="outline" className="rounded-full">
+                  Open committee desk
+                </Button>
+              </Link>
             </div>
-          ))}
-        </div>
+          </div>
+
+          <div className="ops-shell bg-foreground text-background">
+            <div className="text-xs uppercase tracking-[0.28em] text-background/65">Live Mission</div>
+            <p className="mt-5 text-lg leading-8">{mission}</p>
+            <div className="ops-rule my-6 bg-background/50" />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <div className="text-xs uppercase tracking-[0.28em] text-background/65">Treasury</div>
+                <div className="mt-2 text-3xl font-bold">{formatUsd(treasury?.treasury_balance_usd_cents ?? 0)}</div>
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-[0.28em] text-background/65">AI-Passed Queue</div>
+                <div className="mt-2 text-3xl font-bold">{passedQueue.length}</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-4 md:grid-cols-3">
+          <div className="ops-shell">
+            <div className="text-xs uppercase tracking-[0.28em] text-muted-foreground">Applications</div>
+            <div className="ops-number mt-3">{proposals.length}</div>
+            <p className="mt-3 text-sm leading-7 text-muted-foreground">Every submission becomes a full AI dossier before committee review.</p>
+          </div>
+          <div className="ops-shell">
+            <div className="text-xs uppercase tracking-[0.28em] text-muted-foreground">Arc Rail</div>
+            <div className="mt-3 break-all text-lg font-semibold">{treasury?.arc_treasury_address || "Configure Arc treasury address"}</div>
+            <p className="mt-3 text-sm leading-7 text-muted-foreground">Milestone payouts leave GenLayer and settle through the Arc USDC treasury rail.</p>
+          </div>
+          <div className="ops-shell">
+            <div className="text-xs uppercase tracking-[0.28em] text-muted-foreground">USDC Token</div>
+            <div className="mt-3 break-all text-lg font-semibold">{treasury?.usdc_token_address || "Configure USDC token"}</div>
+            <p className="mt-3 text-sm leading-7 text-muted-foreground">Treasury accounting is denominated in USD cents across application scoring and releases.</p>
+          </div>
+        </section>
       </div>
     </DaoLayout>
   );

@@ -1,156 +1,116 @@
+@import url("https://fonts.googleapis.com/css2?family=Syne:wght@500;700;800&family=Manrope:wght@400;500;600;700&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    /* Dark theme - DAO governance aesthetic */
-    --background: 220 20% 4%;
-    --foreground: 210 20% 95%;
-
-    --card: 220 25% 8%;
-    --card-foreground: 210 20% 95%;
-
-    --popover: 220 25% 8%;
-    --popover-foreground: 210 20% 95%;
-
-    /* Primary: Emerald green - trust/governance */
-    --primary: 160 84% 39%;
-    --primary-foreground: 0 0% 100%;
-
-    --secondary: 220 20% 14%;
-    --secondary-foreground: 210 20% 90%;
-
-    --muted: 220 15% 12%;
-    --muted-foreground: 215 15% 55%;
-
-    /* Accent: Amber for attention */
-    --accent: 38 92% 50%;
-    --accent-foreground: 0 0% 5%;
-
-    --destructive: 0 72% 51%;
+    --background: 203 24% 95%;
+    --foreground: 227 16% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 227 16% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 227 16% 12%;
+    --primary: 154 44% 35%;
+    --primary-foreground: 203 24% 95%;
+    --secondary: 200 20% 87%;
+    --secondary-foreground: 227 16% 12%;
+    --muted: 204 14% 90%;
+    --muted-foreground: 227 10% 42%;
+    --accent: 14 72% 56%;
+    --accent-foreground: 203 24% 95%;
+    --destructive: 0 72% 50%;
     --destructive-foreground: 0 0% 100%;
-
-    --border: 220 15% 16%;
-    --input: 220 15% 14%;
-    --ring: 160 84% 39%;
-
-    --radius: 0.75rem;
-
-    /* Score colors */
-    --score-impact: 160 84% 39%;
-    --score-feasibility: 200 90% 50%;
-    --score-alignment: 270 80% 60%;
-    --score-pass: 160 84% 39%;
-    --score-fail: 0 72% 51%;
-
-    /* Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(160 84% 39%), hsl(180 70% 40%));
-    --gradient-hero: linear-gradient(135deg, hsl(220 20% 4%) 0%, hsl(220 30% 8%) 50%, hsl(160 30% 8%) 100%);
-    --gradient-card: linear-gradient(135deg, hsl(220 25% 8%) 0%, hsl(220 20% 10%) 100%);
-
-    --sidebar-background: 220 20% 6%;
-    --sidebar-foreground: 210 20% 90%;
-    --sidebar-primary: 160 84% 39%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 20% 12%;
-    --sidebar-accent-foreground: 210 20% 90%;
-    --sidebar-border: 220 15% 16%;
-    --sidebar-ring: 160 84% 39%;
+    --border: 227 16% 12%;
+    --input: 204 14% 90%;
+    --ring: 154 44% 35%;
+    --radius: 1rem;
+    --score-impact: 154 44% 35%;
+    --score-feasibility: 203 65% 48%;
+    --score-alignment: 14 72% 56%;
+    --score-pass: 154 44% 35%;
+    --score-fail: 0 72% 50%;
+    --sidebar-background: 203 24% 95%;
+    --sidebar-foreground: 227 16% 12%;
+    --sidebar-primary: 154 44% 35%;
+    --sidebar-primary-foreground: 203 24% 95%;
+    --sidebar-accent: 204 14% 90%;
+    --sidebar-accent-foreground: 227 16% 12%;
+    --sidebar-border: 227 16% 12%;
+    --sidebar-ring: 154 44% 35%;
   }
-}
 
-@layer base {
   * {
     @apply border-border;
   }
 
-  body {
-    @apply bg-background text-foreground antialiased;
-    font-feature-settings: 'rlig' 1, 'calt' 1;
+  html {
+    scroll-behavior: smooth;
   }
 
-  h1, h2, h3, h4, h5, h6 {
-    @apply font-semibold tracking-tight;
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: "Manrope", sans-serif;
+    background-image:
+      radial-gradient(circle at top right, rgba(25, 128, 92, 0.16), transparent 28%),
+      radial-gradient(circle at 10% 40%, rgba(217, 103, 66, 0.15), transparent 24%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.5), transparent 26%);
+    min-height: 100vh;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: "Syne", sans-serif;
+    letter-spacing: -0.04em;
+  }
+}
+
+@layer components {
+  .ops-shell {
+    @apply rounded-[2rem] border border-foreground bg-card p-6 shadow-[12px_12px_0px_rgba(24,31,47,0.10)];
+  }
+
+  .ops-chip {
+    @apply inline-flex items-center gap-2 rounded-full border border-foreground px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.28em];
+  }
+
+  .ops-rule {
+    background-image: linear-gradient(90deg, transparent 0, hsl(var(--foreground)) 12%, transparent 100%);
+    height: 1px;
+  }
+
+  .ops-number {
+    @apply font-display text-4xl font-bold;
+    font-family: "Syne", sans-serif;
+  }
+
+  .glass-card {
+    @apply rounded-[1.5rem] border border-foreground/15 bg-card/90 p-5;
   }
 }
 
 @layer utilities {
+  .font-display {
+    font-family: "Syne", sans-serif;
+  }
+
   .animate-fade-in {
-    animation: fadeIn 0.5s ease-out forwards;
-  }
-
-  .animate-slide-up {
-    animation: slideUp 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-  }
-
-  .animate-score-fill {
-    animation: scoreFill 1.2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-  }
-
-  .animate-pulse-glow {
-    animation: pulseGlow 2s ease-in-out infinite;
-  }
-
-  .animate-typewriter {
-    animation: typewriter 0.05s steps(1) forwards;
-  }
-
-  .animate-confetti {
-    animation: confettiPop 0.6s cubic-bezier(0.36, 0.07, 0.19, 0.97) forwards;
+    animation: fadeIn 0.2s ease-out forwards;
   }
 
   @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  @keyframes slideUp {
-    from { opacity: 0; transform: translateY(30px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  @keyframes scoreFill {
-    from { width: 0%; }
-  }
-
-  @keyframes pulseGlow {
-    0%, 100% { box-shadow: 0 0 20px hsl(160 84% 39% / 0.2); }
-    50% { box-shadow: 0 0 40px hsl(160 84% 39% / 0.4); }
-  }
-
-  @keyframes confettiPop {
-    0% { transform: scale(0.8); opacity: 0; }
-    50% { transform: scale(1.1); }
-    100% { transform: scale(1); opacity: 1; }
-  }
-
-  .glass-card {
-    background: hsl(var(--card) / 0.6);
-    border: 1px solid hsl(var(--border));
-    backdrop-filter: blur(12px);
-    border-radius: var(--radius);
-  }
-
-  .gradient-text {
-    background: linear-gradient(135deg, hsl(160 84% 50%), hsl(180 70% 50%));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-
-  .gradient-border {
-    position: relative;
-    border: 1px solid transparent;
-    background-clip: padding-box;
-  }
-
-  .gradient-border::before {
-    content: '';
-    position: absolute;
-    inset: -1px;
-    border-radius: inherit;
-    background: linear-gradient(135deg, hsl(160 84% 39% / 0.3), hsl(270 80% 60% / 0.3));
-    z-index: -1;
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 }

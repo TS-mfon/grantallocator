@@ -1,7 +1,15 @@
-import { createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
+import { createClient } from "genlayer-js";
 
-export const CONTRACT_ADDRESS = "0x70a86f37BD82c0DB38D6b3b7067bbC3085319F35";
+export const CONTRACT_ADDRESS =
+  (import.meta.env.VITE_GRANT_ALLOCATOR_ADDRESS as string | undefined) ||
+  "0x70a86f37BD82c0DB38D6b3b7067bbC3085319F35";
+export const ARC_TREASURY_ADDRESS =
+  (import.meta.env.VITE_ARC_TREASURY_ADDRESS as string | undefined) || "";
+export const ARC_USDC_TOKEN_ADDRESS =
+  (import.meta.env.VITE_ARC_USDC_TOKEN_ADDRESS as string | undefined) || "";
+export const ARC_CHAIN_NAME =
+  (import.meta.env.VITE_ARC_CHAIN_NAME as string | undefined) || "Arc Testnet";
 
 export const GENLAYER_CHAIN_ID = 61999;
 export const GENLAYER_CHAIN_ID_HEX = `0x${GENLAYER_CHAIN_ID.toString(16).toUpperCase()}`;

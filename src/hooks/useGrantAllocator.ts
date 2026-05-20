@@ -1,10 +1,9 @@
 import { useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { useWallet } from "@/lib/genlayer/WalletProvider";
 import { CONTRACT_ADDRESS } from "@/lib/genlayer/client";
-import GrantAllocatorContract from "@/lib/contracts/GrantAllocator";
-import type { Proposal } from "@/lib/contracts/GrantAllocator";
-import { toast } from "sonner";
+import GrantAllocatorContract, { type Proposal } from "@/lib/contracts/GrantAllocator";
 
 function useContract() {
   const { address } = useWallet();
@@ -20,6 +19,15 @@ export function useAllProposals(statusFilter = "") {
   });
 }
 
+export function usePassedScreeningProposals() {
+  const contract = useContract();
+  return useQuery({
+    queryKey: ["passed-screening-proposals"],
+    queryFn: () => contract.getPassedScreeningProposals(),
+    staleTime: 5000,
+  });
+}
+
 export function useProposal(proposalId: string) {
   const contract = useContract();
   return useQuery({
@@ -28,7 +36,9 @@ export function useProposal(proposalId: string) {
     enabled: !!proposalId,
     refetchInterval: (query) => {
       const data = query.state.data as Proposal | undefined;
-      return data?.status === "PENDING_EVALUATION" ? 3000 : false;
+      return data && ["PENDING_EVALUATION", "PENDING_VOTE", "MILESTONE_REVIEW", "READY_FOR_RELEASE"].includes(data.status)
+        ? 4000
+        : false;
     },
   });
 }
@@ -38,6 +48,15 @@ export function useTreasuryBalance() {
   return useQuery({
     queryKey: ["treasury-balance"],
     queryFn: () => contract.getTreasuryBalance(),
+    staleTime: 10000,
+  });
+}
+
+export function useTreasurySummary() {
+  const contract = useContract();
+  return useQuery({
+    queryKey: ["treasury-summary"],
+    queryFn: () => contract.getTreasurySummary(),
     staleTime: 10000,
   });
 }
@@ -98,16 +117,34 @@ export function useDisbursementHistory() {
   });
 }
 
+export function useCommitteeMembers() {
+  const contract = useContract();
+  return useQuery({
+    queryKey: ["committee-members"],
+    queryFn: () => contract.getCommitteeMembers(),
+    staleTime: 10000,
+  });
+}
+
 export function useSubmitApplication() {
   const contract = useContract();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { title: string; description: string; requestedAmount: number; teamBackground: string; milestones: string }) =>
-      contract.submitApplication(data.title, data.description, data.requestedAmount, data.teamBackground, data.milestones),
+    mutationFn: (input: {
+      title: string;
+      description: string;
+      requestedAmountUsdCents: number;
+      teamBackground: string;
+      teamLinksJson: string;
+      milestonesJson: string;
+      marketContextJson: string;
+      dueDiligenceJson: string;
+    }) => contract.submitApplication(input),
     onSuccess: () => {
-      toast.success("Application submitted! AI evaluation in progress...");
+      toast.success("Application submitted. AI screening in progress.");
       qc.invalidateQueries({ queryKey: ["proposals"] });
       qc.invalidateQueries({ queryKey: ["my-proposals"] });
+      qc.invalidateQueries({ queryKey: ["passed-screening-proposals"] });
     },
     onError: (err: Error) => toast.error(`Submission failed: ${err.message}`),
   });
@@ -118,15 +155,89 @@ export function useCastVote(proposalId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (vote: "FOR" | "AGAINST" | "ABSTAIN") => contract.castVote(proposalId, vote),
-    onMutate: (vote) => { toast.loading(`Submitting ${vote} vote...`); },
     onSuccess: () => {
-      toast.dismiss();
-      toast.success("Vote recorded on-chain!");
+      toast.success("Committee vote recorded.");
       qc.invalidateQueries({ queryKey: ["proposal", proposalId] });
       qc.invalidateQueries({ queryKey: ["member-vote", proposalId] });
       qc.invalidateQueries({ queryKey: ["proposals"] });
     },
-    onError: (err: Error) => { toast.dismiss(); toast.error(`Vote failed: ${err.message}`); },
+    onError: (err: Error) => toast.error(`Vote failed: ${err.message}`),
+  });
+}
+
+export function useExecuteProposal() {
+  const contract = useContract();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (proposalId: string) => contract.executeProposal(proposalId),
+    onSuccess: () => {
+      toast.success("Proposal approved and scheduled for Arc treasury payout.");
+      qc.invalidateQueries({ queryKey: ["proposals"] });
+      qc.invalidateQueries({ queryKey: ["treasury-summary"] });
+      qc.invalidateQueries({ queryKey: ["disbursement-history"] });
+    },
+    onError: (err: Error) => toast.error(`Execution failed: ${err.message}`),
+  });
+}
+
+export function useSubmitMilestoneEvidence() {
+  const contract = useContract();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      proposalId,
+      milestoneId,
+      evidenceUri,
+      note,
+    }: {
+      proposalId: string;
+      milestoneId: string;
+      evidenceUri: string;
+      note: string;
+    }) => contract.submitMilestoneEvidence(proposalId, milestoneId, evidenceUri, note),
+    onSuccess: () => {
+      toast.success("Milestone evidence submitted.");
+      qc.invalidateQueries({ queryKey: ["proposal"] });
+      qc.invalidateQueries({ queryKey: ["my-proposals"] });
+    },
+    onError: (err: Error) => toast.error(`Evidence submission failed: ${err.message}`),
+  });
+}
+
+export function useReviewMilestone() {
+  const contract = useContract();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ proposalId, milestoneId }: { proposalId: string; milestoneId: string }) =>
+      contract.reviewMilestone(proposalId, milestoneId),
+    onSuccess: () => {
+      toast.success("AI milestone review complete.");
+      qc.invalidateQueries({ queryKey: ["proposal"] });
+    },
+    onError: (err: Error) => toast.error(`Milestone review failed: ${err.message}`),
+  });
+}
+
+export function useReleaseTranche() {
+  const contract = useContract();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      proposalId,
+      milestoneId,
+      arcTxHash,
+    }: {
+      proposalId: string;
+      milestoneId: string;
+      arcTxHash: string;
+    }) => contract.releaseTranche(proposalId, milestoneId, arcTxHash),
+    onSuccess: () => {
+      toast.success("USDC tranche release recorded.");
+      qc.invalidateQueries({ queryKey: ["proposal"] });
+      qc.invalidateQueries({ queryKey: ["treasury-summary"] });
+      qc.invalidateQueries({ queryKey: ["disbursement-history"] });
+    },
+    onError: (err: Error) => toast.error(`Tranche release failed: ${err.message}`),
   });
 }
 
@@ -134,10 +245,11 @@ export function useFundTreasury() {
   const contract = useContract();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (amount: number) => contract.fundTreasury(amount),
+    mutationFn: (amountUsdCents: number) => contract.fundTreasury(amountUsdCents),
     onSuccess: () => {
-      toast.success("Treasury funded!");
+      toast.success("Treasury funded.");
       qc.invalidateQueries({ queryKey: ["treasury-balance"] });
+      qc.invalidateQueries({ queryKey: ["treasury-summary"] });
       qc.invalidateQueries({ queryKey: ["disbursement-history"] });
     },
     onError: (err: Error) => toast.error(`Funding failed: ${err.message}`),
@@ -150,7 +262,7 @@ export function useUpdateThreshold() {
   return useMutation({
     mutationFn: (threshold: number) => contract.updateThreshold(threshold),
     onSuccess: () => {
-      toast.success("Threshold updated!");
+      toast.success("Threshold updated.");
       qc.invalidateQueries({ queryKey: ["score-threshold"] });
     },
     onError: (err: Error) => toast.error(`Update failed: ${err.message}`),
@@ -163,25 +275,10 @@ export function useUpdateMission() {
   return useMutation({
     mutationFn: (mission: string) => contract.updateMission(mission),
     onSuccess: () => {
-      toast.success("Mission updated!");
+      toast.success("Mission updated.");
       qc.invalidateQueries({ queryKey: ["dao-mission"] });
     },
     onError: (err: Error) => toast.error(`Update failed: ${err.message}`),
-  });
-}
-
-export function useExecuteProposal() {
-  const contract = useContract();
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (proposalId: string) => contract.executeProposal(proposalId),
-    onSuccess: () => {
-      toast.success("Proposal executed! Funds disbursed.");
-      qc.invalidateQueries({ queryKey: ["proposals"] });
-      qc.invalidateQueries({ queryKey: ["treasury-balance"] });
-      qc.invalidateQueries({ queryKey: ["disbursement-history"] });
-    },
-    onError: (err: Error) => toast.error(`Execution failed: ${err.message}`),
   });
 }
 
@@ -191,10 +288,38 @@ export function useCancelProposal() {
   return useMutation({
     mutationFn: (proposalId: string) => contract.cancelProposal(proposalId),
     onSuccess: () => {
-      toast.success("Proposal cancelled.");
+      toast.success("Application cancelled.");
       qc.invalidateQueries({ queryKey: ["proposals"] });
       qc.invalidateQueries({ queryKey: ["my-proposals"] });
     },
     onError: (err: Error) => toast.error(`Cancel failed: ${err.message}`),
+  });
+}
+
+export function useSetCommitteeMember() {
+  const contract = useContract();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ memberAddress, allowed }: { memberAddress: string; allowed: boolean }) =>
+      contract.setCommitteeMember(memberAddress, allowed),
+    onSuccess: () => {
+      toast.success("Committee updated.");
+      qc.invalidateQueries({ queryKey: ["committee-members"] });
+    },
+    onError: (err: Error) => toast.error(`Committee update failed: ${err.message}`),
+  });
+}
+
+export function useConfigureArcTreasury() {
+  const contract = useContract();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ arcTreasuryAddress, usdcTokenAddress }: { arcTreasuryAddress: string; usdcTokenAddress: string }) =>
+      contract.configureArcTreasury(arcTreasuryAddress, usdcTokenAddress),
+    onSuccess: () => {
+      toast.success("Arc treasury configuration updated.");
+      qc.invalidateQueries({ queryKey: ["treasury-summary"] });
+    },
+    onError: (err: Error) => toast.error(`Arc treasury update failed: ${err.message}`),
   });
 }

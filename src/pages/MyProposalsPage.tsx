@@ -1,56 +1,83 @@
-import { useNavigate } from "react-router-dom";
+import { useState } from "react";
 import { DaoLayout } from "@/components/dao/DaoLayout";
-import { useMyProposals } from "@/hooks/useGrantAllocator";
-import { useWallet } from "@/lib/genlayer/WalletProvider";
-import { ProposalCard } from "@/components/dao/ProposalCard";
-import { Loader2, AlertCircle, FileText } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useMyProposals, useSubmitMilestoneEvidence } from "@/hooks/useGrantAllocator";
 
 export default function MyProposalsPage() {
-  const { isConnected } = useWallet();
-  const { data: proposals = [], isLoading } = useMyProposals();
-  const navigate = useNavigate();
-
-  if (!isConnected) {
-    return (
-      <DaoLayout>
-        <div className="text-center py-20">
-          <AlertCircle className="w-12 h-12 text-accent mx-auto mb-4" />
-          <h2 className="text-2xl font-bold mb-2">Connect Your Wallet</h2>
-          <p className="text-muted-foreground">Connect your wallet to view your submitted proposals.</p>
-        </div>
-      </DaoLayout>
-    );
-  }
+  const { data: proposals = [] } = useMyProposals();
+  const submitEvidence = useSubmitMilestoneEvidence();
+  const [evidenceState, setEvidenceState] = useState<Record<string, { uri: string; note: string }>>({});
 
   return (
     <DaoLayout>
-      <div className="mb-8 animate-fade-in">
-        <div className="flex items-center gap-3 mb-2">
-          <FileText className="w-6 h-6 text-primary" />
-          <h1 className="text-3xl font-bold">My Proposals</h1>
-        </div>
-        <p className="text-muted-foreground">Track all your submitted proposals and their statuses.</p>
-      </div>
+      <div className="space-y-8">
+        <section className="ops-shell">
+          <div className="ops-chip">Applicant Workspace</div>
+          <h1 className="mt-5 text-4xl leading-none sm:text-5xl">Track milestones and push evidence back into the release rail.</h1>
+        </section>
 
-      {isLoading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
-        </div>
-      ) : proposals.length === 0 ? (
-        <div className="text-center py-20 text-muted-foreground">
-          <p className="text-lg">You haven't submitted any proposals yet.</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {proposals.map((proposal) => (
-            <ProposalCard
-              key={proposal.proposal_id}
-              proposal={proposal}
-              onClick={() => navigate(`/proposals/${proposal.proposal_id}`)}
-            />
-          ))}
-        </div>
-      )}
+        {proposals.map((proposal) => (
+          <section key={proposal.proposal_id} className="ops-shell">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="ops-chip">{proposal.status}</div>
+                <h2 className="mt-4 text-2xl">{proposal.title}</h2>
+              </div>
+              <div className="text-sm text-muted-foreground">{proposal.arc_grant_id || "Arc grant not scheduled yet"}</div>
+            </div>
+
+            <div className="mt-6 grid gap-4">
+              {proposal.milestones.map((milestone) => {
+                const key = `${proposal.proposal_id}:${milestone.milestone_id}`;
+                const current = evidenceState[key] || { uri: "", note: "" };
+                return (
+                  <div key={milestone.milestone_id} className="glass-card">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <div className="ops-chip">{milestone.status}</div>
+                        <h3 className="mt-4 text-xl">{milestone.title}</h3>
+                        <p className="mt-2 text-sm leading-7 text-muted-foreground">{milestone.description}</p>
+                      </div>
+                      <div className="text-sm">{milestone.amount_usd_cents / 100} USD</div>
+                    </div>
+                    <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+                      <Input
+                        value={current.uri}
+                        onChange={(event) =>
+                          setEvidenceState((state) => ({ ...state, [key]: { ...current, uri: event.target.value } }))
+                        }
+                        placeholder="Evidence URL"
+                      />
+                      <Input
+                        value={current.note}
+                        onChange={(event) =>
+                          setEvidenceState((state) => ({ ...state, [key]: { ...current, note: event.target.value } }))
+                        }
+                        placeholder="Evidence note"
+                      />
+                      <Button
+                        className="rounded-full"
+                        disabled={submitEvidence.isPending || !current.uri}
+                        onClick={() =>
+                          submitEvidence.mutate({
+                            proposalId: proposal.proposal_id,
+                            milestoneId: milestone.milestone_id,
+                            evidenceUri: current.uri,
+                            note: current.note,
+                          })
+                        }
+                      >
+                        Submit evidence
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ))}
+      </div>
     </DaoLayout>
   );
 }

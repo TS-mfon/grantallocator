@@ -1,43 +1,46 @@
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { DaoLayout } from "@/components/dao/DaoLayout";
-import { useAllProposals } from "@/hooks/useGrantAllocator";
-import { ProposalCard } from "@/components/dao/ProposalCard";
-import { Loader2, Clock } from "lucide-react";
+import { usePassedScreeningProposals } from "@/hooks/useGrantAllocator";
 
 export default function VotePage() {
-  const { data: proposals = [], isLoading } = useAllProposals("PENDING_VOTE");
-  const navigate = useNavigate();
+  const { data: proposals = [] } = usePassedScreeningProposals();
 
   return (
     <DaoLayout>
-      <div className="mb-8 animate-fade-in">
-        <div className="flex items-center gap-3 mb-2">
-          <Clock className="w-6 h-6 text-primary" />
-          <h1 className="text-3xl font-bold">Active Votes</h1>
-        </div>
-        <p className="text-muted-foreground">Proposals currently open for DAO member voting. AI recommendations shown on each.</p>
-      </div>
+      <div className="space-y-8">
+        <section className="ops-shell">
+          <div className="ops-chip">Committee Desk</div>
+          <h1 className="mt-5 text-4xl leading-none sm:text-5xl">Only AI-passed applications enter the human voting room.</h1>
+        </section>
 
-      {isLoading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
-        </div>
-      ) : proposals.length === 0 ? (
-        <div className="text-center py-20 text-muted-foreground">
-          <p className="text-lg">No active votes right now.</p>
-          <p className="text-sm mt-2">All proposals are either pending AI evaluation or have completed voting.</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <section className="grid gap-4">
           {proposals.map((proposal) => (
-            <ProposalCard
-              key={proposal.proposal_id}
-              proposal={proposal}
-              onClick={() => navigate(`/proposals/${proposal.proposal_id}`)}
-            />
+            <Link key={proposal.proposal_id} to={`/proposals/${proposal.proposal_id}`} className="ops-shell block">
+              <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+                <div>
+                  <div className="ops-chip">{proposal.status}</div>
+                  <h2 className="mt-4 text-2xl">{proposal.title}</h2>
+                  <p className="mt-3 text-sm leading-7 text-muted-foreground">{proposal.ai_packet.rationale}</p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="glass-card">
+                    <div className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Composite</div>
+                    <div className="mt-3 text-3xl font-bold">{proposal.ai_packet.composite ?? 0}</div>
+                  </div>
+                  <div className="glass-card">
+                    <div className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Trust</div>
+                    <div className="mt-3 text-3xl font-bold">{proposal.ai_packet.trust_score ?? 0}</div>
+                  </div>
+                  <div className="glass-card">
+                    <div className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Market</div>
+                    <div className="mt-3 text-3xl font-bold">{proposal.ai_packet.market_sentiment ?? 0}</div>
+                  </div>
+                </div>
+              </div>
+            </Link>
           ))}
-        </div>
-      )}
+        </section>
+      </div>
     </DaoLayout>
   );
 }

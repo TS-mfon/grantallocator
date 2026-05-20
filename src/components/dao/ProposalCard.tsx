@@ -1,5 +1,4 @@
 import type { Proposal } from "@/lib/contracts/GrantAllocator";
-import { Badge } from "@/components/ui/badge";
 
 export function StatusBadge({ status }: { status: string }) {
   const variants: Record<string, { className: string; label: string }> = {
@@ -10,6 +9,9 @@ export function StatusBadge({ status }: { status: string }) {
     REJECTED: { className: "bg-destructive/20 text-destructive border-destructive/30", label: "Rejected" },
     LAPSED: { className: "bg-muted-foreground/20 text-muted-foreground border-muted-foreground/30", label: "Lapsed" },
     CANCELLED: { className: "bg-muted-foreground/20 text-muted-foreground border-muted-foreground/30", label: "Cancelled" },
+    READY_FOR_RELEASE: { className: "bg-primary/20 text-primary border-primary/30", label: "Ready for Release" },
+    ACTIVE_MILESTONES: { className: "bg-primary/20 text-primary border-primary/30", label: "Milestones Active" },
+    COMPLETED: { className: "bg-score-pass/20 text-score-pass border-score-pass/30", label: "Completed" },
   };
 
   const v = variants[status] || { className: "bg-muted text-muted-foreground", label: status };
@@ -22,7 +24,7 @@ export function StatusBadge({ status }: { status: string }) {
 }
 
 export function ProposalCard({ proposal, onClick }: { proposal: Proposal; onClick?: () => void }) {
-  const composite = proposal.scores?.composite ?? 0;
+  const composite = proposal.ai_packet?.composite ?? 0;
 
   return (
     <button
@@ -45,11 +47,11 @@ export function ProposalCard({ proposal, onClick }: { proposal: Proposal; onClic
               Score: {composite}/100
             </span>
           )}
-          <span>{proposal.requested_amount.toLocaleString()} GEN</span>
+          <span>${(proposal.requested_amount_usd_cents / 100).toLocaleString()} USD</span>
         </div>
         <div className="flex items-center gap-2">
-          <span>👍 {proposal.for_votes}</span>
-          <span>👎 {proposal.against_votes}</span>
+          <span>👍 {proposal.committee_votes_for}</span>
+          <span>👎 {proposal.committee_votes_against}</span>
         </div>
       </div>
     </button>

@@ -1,155 +1,217 @@
 import { useParams } from "react-router-dom";
 import { DaoLayout } from "@/components/dao/DaoLayout";
-import { useProposal, useMemberVote, useCastVote, useExecuteProposal, useCancelProposal } from "@/hooks/useGrantAllocator";
+import {
+  useProposal,
+  useMemberVote,
+  useCastVote,
+  useExecuteProposal,
+  useCancelProposal,
+  useReviewMilestone,
+  useReleaseTranche,
+} from "@/hooks/useGrantAllocator";
 import { useWallet } from "@/lib/genlayer/WalletProvider";
-import { ScoreBar } from "@/components/dao/ScoreBar";
-import { StatusBadge } from "@/components/dao/ProposalCard";
-import { formatAddress } from "@/lib/genlayer/client";
 import { Button } from "@/components/ui/button";
-import { Loader2, ThumbsUp, ThumbsDown, MinusCircle, Play, XCircle } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { useState } from "react";
+
+const formatUsd = (cents: number) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(cents / 100);
 
 export default function ProposalDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { data: proposal, isLoading } = useProposal(id || "");
+  const { data: proposal } = useProposal(id || "");
   const { address } = useWallet();
   const { data: myVote } = useMemberVote(id || "");
   const castVote = useCastVote(id || "");
   const executeProposal = useExecuteProposal();
   const cancelProposal = useCancelProposal();
-
-  if (isLoading) {
-    return (
-      <DaoLayout>
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
-        </div>
-      </DaoLayout>
-    );
-  }
+  const reviewMilestone = useReviewMilestone();
+  const releaseTranche = useReleaseTranche();
+  const [arcTxHashes, setArcTxHashes] = useState<Record<string, string>>({});
 
   if (!proposal || !proposal.title) {
     return (
       <DaoLayout>
-        <div className="text-center py-20 text-muted-foreground">Proposal not found.</div>
+        <div className="ops-shell">Proposal not found.</div>
       </DaoLayout>
     );
   }
 
-  const scores = proposal.scores || {};
-  const composite = scores.composite ?? 0;
-  const canVote = proposal.status === "PENDING_VOTE" && !myVote && !!address;
   const isApplicant = address?.toLowerCase() === proposal.applicant?.toLowerCase();
-  const canCancel = isApplicant && ["PENDING_EVALUATION", "PENDING_VOTE"].includes(proposal.status);
-  const canExecute = proposal.status === "PENDING_VOTE" && !proposal.executed;
 
   return (
     <DaoLayout>
-      <div className="max-w-3xl mx-auto animate-fade-in">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-start justify-between gap-4 mb-4">
-            <div>
-              <h1 className="text-3xl font-bold mb-2">{proposal.title}</h1>
-              <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                <span>by {formatAddress(proposal.applicant, 16)}</span>
-                <span>•</span>
-                <span>{proposal.requested_amount.toLocaleString()} GEN requested</span>
+      <div className="space-y-8">
+        <section className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
+          <div className="ops-shell">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="ops-chip">{proposal.status}</div>
+                <h1 className="mt-5 text-4xl leading-none">{proposal.title}</h1>
+                <p className="mt-4 text-sm uppercase tracking-[0.25em] text-muted-foreground">
+                  Applicant {proposal.applicant}
+                </p>
+              </div>
+              <div className="text-right">
+                <div className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Requested</div>
+                <div className="mt-2 text-3xl font-bold">{formatUsd(proposal.requested_amount_usd_cents)}</div>
               </div>
             </div>
-            <StatusBadge status={proposal.status} />
-          </div>
-        </div>
-
-        {/* AI Scorecard */}
-        {composite > 0 && (
-          <div className="glass-card p-6 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold">AI Evaluation</h2>
-              <div className={`text-2xl font-bold font-mono ${composite >= 70 ? "text-score-pass" : "text-score-fail"}`}>
-                {composite}/100
+            <p className="mt-6 whitespace-pre-wrap text-sm leading-8 text-foreground/85">{proposal.description}</p>
+            <div className="ops-rule my-6" />
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="glass-card">
+                <div className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Composite</div>
+                <div className="mt-3 text-3xl font-bold">{proposal.ai_packet.composite ?? 0}</div>
+              </div>
+              <div className="glass-card">
+                <div className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Trust</div>
+                <div className="mt-3 text-3xl font-bold">{proposal.ai_packet.trust_score ?? 0}</div>
+              </div>
+              <div className="glass-card">
+                <div className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Recommended</div>
+                <div className="mt-3 text-3xl font-bold">{formatUsd(proposal.approved_amount_usd_cents)}</div>
               </div>
             </div>
-            <div className="space-y-4">
-              <ScoreBar label="Impact" score={scores.impact ?? 0} maxScore={40} colorClass="bg-score-impact" delay={0} />
-              <ScoreBar label="Feasibility" score={scores.feasibility ?? 0} maxScore={35} colorClass="bg-score-feasibility" delay={300} />
-              <ScoreBar label="Alignment" score={scores.alignment ?? 0} maxScore={25} colorClass="bg-score-alignment" delay={600} />
+          </div>
+
+          <div className="ops-shell">
+            <div className="ops-chip">AI Breakdown</div>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {[
+                ["Impact", proposal.ai_packet.impact],
+                ["Feasibility", proposal.ai_packet.feasibility],
+                ["Alignment", proposal.ai_packet.alignment],
+                ["Market", proposal.ai_packet.market_sentiment],
+                ["Narrative", proposal.ai_packet.narrative_fit],
+                ["Trust", proposal.ai_packet.trust_score],
+              ].map(([label, value]) => (
+                <div key={label} className="glass-card">
+                  <div className="text-xs uppercase tracking-[0.25em] text-muted-foreground">{label}</div>
+                  <div className="mt-3 text-3xl font-bold">{value ?? 0}</div>
+                </div>
+              ))}
             </div>
-            {proposal.rationale && (
-              <div className="mt-4 p-4 rounded-lg bg-secondary/50 border border-border">
-                <p className="text-sm text-muted-foreground italic">"{proposal.rationale}"</p>
+            <p className="mt-5 text-sm leading-7 text-muted-foreground">{proposal.ai_packet.rationale}</p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {(proposal.ai_packet.risk_flags || []).map((flag) => (
+                <span key={flag} className="ops-chip">{flag}</span>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+          <div className="ops-shell">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="ops-chip">Committee Vote</div>
+                <h2 className="mt-4 text-2xl">Voting is enabled only after AI screening.</h2>
               </div>
-            )}
-          </div>
-        )}
-
-        {/* Description */}
-        <div className="glass-card p-6 mb-6">
-          <h2 className="text-lg font-semibold mb-3">Description</h2>
-          <p className="text-muted-foreground whitespace-pre-wrap">{proposal.description}</p>
-        </div>
-
-        {/* Team & Milestones */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          <div className="glass-card p-6">
-            <h2 className="text-lg font-semibold mb-3">Team Background</h2>
-            <p className="text-sm text-muted-foreground whitespace-pre-wrap">{proposal.team_background}</p>
-          </div>
-          <div className="glass-card p-6">
-            <h2 className="text-lg font-semibold mb-3">Milestones</h2>
-            <p className="text-sm text-muted-foreground whitespace-pre-wrap">{proposal.milestones}</p>
-          </div>
-        </div>
-
-        {/* Voting */}
-        <div className="glass-card p-6 mb-6">
-          <h2 className="text-lg font-semibold mb-4">Vote Tally</h2>
-          <div className="grid grid-cols-3 gap-4 mb-6">
-            <div className="text-center p-3 rounded-lg bg-primary/10 border border-primary/20">
-              <div className="text-2xl font-bold text-primary">{proposal.for_votes}</div>
-              <div className="text-xs text-muted-foreground">For</div>
+              {myVote ? <div className="ops-chip">You voted {myVote}</div> : null}
             </div>
-            <div className="text-center p-3 rounded-lg bg-destructive/10 border border-destructive/20">
-              <div className="text-2xl font-bold text-destructive">{proposal.against_votes}</div>
-              <div className="text-xs text-muted-foreground">Against</div>
+            <div className="mt-5 grid gap-3 sm:grid-cols-3">
+              <div className="glass-card">
+                <div className="text-xs uppercase tracking-[0.25em] text-muted-foreground">For</div>
+                <div className="mt-3 text-3xl font-bold">{proposal.committee_votes_for}</div>
+              </div>
+              <div className="glass-card">
+                <div className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Against</div>
+                <div className="mt-3 text-3xl font-bold">{proposal.committee_votes_against}</div>
+              </div>
+              <div className="glass-card">
+                <div className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Abstain</div>
+                <div className="mt-3 text-3xl font-bold">{proposal.committee_votes_abstain}</div>
+              </div>
             </div>
-            <div className="text-center p-3 rounded-lg bg-muted border border-border">
-              <div className="text-2xl font-bold text-muted-foreground">{proposal.abstain_votes}</div>
-              <div className="text-xs text-muted-foreground">Abstain</div>
-            </div>
-          </div>
-
-          {myVote && (
-            <p className="text-sm text-muted-foreground mb-4">You voted: <span className="font-semibold text-foreground">{myVote}</span></p>
-          )}
-
-          {canVote && (
-            <div className="flex gap-3">
-              <Button onClick={() => castVote.mutate("FOR")} disabled={castVote.isPending} className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground gap-2">
-                <ThumbsUp className="w-4 h-4" /> For
+            <div className="mt-5 flex flex-wrap gap-3">
+              <Button disabled={castVote.isPending || proposal.status !== "PENDING_VOTE"} className="rounded-full" onClick={() => castVote.mutate("FOR")}>
+                Vote for
               </Button>
-              <Button onClick={() => castVote.mutate("AGAINST")} disabled={castVote.isPending} variant="outline" className="flex-1 border-destructive/30 hover:bg-destructive/10 text-destructive gap-2">
-                <ThumbsDown className="w-4 h-4" /> Against
+              <Button disabled={castVote.isPending || proposal.status !== "PENDING_VOTE"} variant="outline" className="rounded-full" onClick={() => castVote.mutate("AGAINST")}>
+                Vote against
               </Button>
-              <Button onClick={() => castVote.mutate("ABSTAIN")} disabled={castVote.isPending} variant="outline" className="flex-1 gap-2">
-                <MinusCircle className="w-4 h-4" /> Abstain
+              <Button disabled={castVote.isPending || proposal.status !== "PENDING_VOTE"} variant="outline" className="rounded-full" onClick={() => castVote.mutate("ABSTAIN")}>
+                Abstain
               </Button>
+              <Button disabled={executeProposal.isPending || proposal.status !== "PENDING_VOTE"} variant="outline" className="rounded-full" onClick={() => executeProposal.mutate(id!)}>
+                Approve schedule
+              </Button>
+              {isApplicant ? (
+                <Button disabled={cancelProposal.isPending} variant="outline" className="rounded-full" onClick={() => cancelProposal.mutate(id!)}>
+                  Cancel
+                </Button>
+              ) : null}
             </div>
-          )}
-        </div>
+          </div>
 
-        {/* Actions */}
-        <div className="flex gap-3">
-          {canExecute && (
-            <Button onClick={() => executeProposal.mutate(id!)} disabled={executeProposal.isPending} className="bg-primary hover:bg-primary/90 text-primary-foreground gap-2">
-              <Play className="w-4 h-4" /> Execute Proposal
-            </Button>
-          )}
-          {canCancel && (
-            <Button onClick={() => cancelProposal.mutate(id!)} disabled={cancelProposal.isPending} variant="outline" className="border-destructive/30 text-destructive gap-2">
-              <XCircle className="w-4 h-4" /> Cancel Proposal
-            </Button>
-          )}
-        </div>
+          <div className="ops-shell">
+            <div className="ops-chip">Team Dossier</div>
+            <pre className="mt-5 whitespace-pre-wrap text-sm leading-7 text-foreground/85">
+              {JSON.stringify(proposal.team_links, null, 2)}
+            </pre>
+            <div className="ops-rule my-5" />
+            <pre className="whitespace-pre-wrap text-sm leading-7 text-foreground/85">
+              {JSON.stringify(proposal.due_diligence, null, 2)}
+            </pre>
+          </div>
+        </section>
+
+        <section className="space-y-4">
+          <div className="ops-shell">
+            <div className="ops-chip">Milestone Rail</div>
+            <h2 className="mt-4 text-2xl">AI reviews completion before each tranche release.</h2>
+          </div>
+
+          {proposal.milestones.map((milestone) => (
+            <div key={milestone.milestone_id} className="ops-shell">
+              <div className="grid gap-4 lg:grid-cols-[1fr_0.9fr]">
+                <div>
+                  <div className="ops-chip">{milestone.status}</div>
+                  <h3 className="mt-4 text-2xl">{milestone.title}</h3>
+                  <p className="mt-3 text-sm leading-7 text-muted-foreground">{milestone.description}</p>
+                  <p className="mt-3 text-sm font-semibold">{formatUsd(milestone.amount_usd_cents)}</p>
+                  {milestone.ai_review ? (
+                    <div className="mt-4 space-y-2">
+                      <div className="text-sm">Completion score: {milestone.ai_review.completion_score}</div>
+                      <div className="text-sm text-muted-foreground">{milestone.ai_review.summary}</div>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="space-y-3">
+                  <Button
+                    variant="outline"
+                    className="w-full rounded-full"
+                    disabled={reviewMilestone.isPending}
+                    onClick={() => reviewMilestone.mutate({ proposalId: id!, milestoneId: milestone.milestone_id })}
+                  >
+                    Run AI milestone review
+                  </Button>
+                  <Input
+                    value={arcTxHashes[milestone.milestone_id] || ""}
+                    onChange={(event) =>
+                      setArcTxHashes((current) => ({ ...current, [milestone.milestone_id]: event.target.value }))
+                    }
+                    placeholder="Arc USDC payout tx hash"
+                  />
+                  <Button
+                    className="w-full rounded-full"
+                    disabled={releaseTranche.isPending || !arcTxHashes[milestone.milestone_id]}
+                    onClick={() =>
+                      releaseTranche.mutate({
+                        proposalId: id!,
+                        milestoneId: milestone.milestone_id,
+                        arcTxHash: arcTxHashes[milestone.milestone_id],
+                      })
+                    }
+                  >
+                    Record tranche release
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </section>
       </div>
     </DaoLayout>
   );

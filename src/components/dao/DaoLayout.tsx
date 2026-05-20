@@ -1,24 +1,18 @@
-import { ReactNode } from "react";
+import type { ReactNode } from "react";
 import { DaoNavbar } from "./DaoNavbar";
 
 export function DaoLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen">
       <DaoNavbar />
-      <main className="flex-grow pt-20 pb-12 px-4 md:px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto">
-          {children}
-        </div>
+      <main className="px-4 pb-12 pt-24 md:px-6 lg:px-8">
+        <div className="mx-auto max-w-7xl">{children}</div>
       </main>
-      <footer className="border-t border-border/50 py-4">
-        <div className="max-w-7xl mx-auto px-4 md:px-6 flex items-center justify-center gap-6 text-sm text-muted-foreground">
-          <span>Grant Allocator DAO</span>
-          <a href="https://genlayer.com" target="_blank" rel="noopener noreferrer" className="hover:text-primary transition-colors">
-            Powered by GenLayer
-          </a>
-          <a href="https://docs.genlayer.com" target="_blank" rel="noopener noreferrer" className="hover:text-primary transition-colors">
-            Docs
-          </a>
+      <footer className="px-4 pb-8 md:px-6">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 rounded-full border border-border bg-background/70 px-5 py-3 text-xs uppercase tracking-[0.28em] text-muted-foreground backdrop-blur">
+          <span>Grant Allocator</span>
+          <span>AI Screening on GenLayer</span>
+          <span>USDC Rail on Arc Testnet</span>
         </div>
       </footer>
     </div>
