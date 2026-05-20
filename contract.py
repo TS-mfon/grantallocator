@@ -10,6 +10,17 @@ ERROR_EXPECTED = "[EXPECTED]"
 ERROR_LLM = "[LLM_ERROR]"
 
 
+def _address_text(value) -> str:
+    if isinstance(value, Address):
+        return value.as_hex
+    if isinstance(value, int):
+        return "0x" + format(value, "040x")
+    text = str(value).strip()
+    if text.startswith("addr#") and len(text) == 45:
+        return "0x" + text[5:]
+    return text
+
+
 def _parse_json_dict(raw: str) -> dict:
     if not raw:
         return {}
@@ -93,8 +104,8 @@ class GrantAllocatorDAO(gl.Contract):
         self.quorum = quorum
         self.voting_period = voting_period
         self.treasury_balance_usd_cents = initial_treasury_usd_cents
-        self.arc_treasury_address = arc_treasury_address[:80]
-        self.usdc_token_address = usdc_token_address[:80]
+        self.arc_treasury_address = _address_text(arc_treasury_address)[:80]
+        self.usdc_token_address = _address_text(usdc_token_address)[:80]
         self.proposal_nonce = 0
         self.tick = 0
 
@@ -261,17 +272,18 @@ Return JSON only:
     def set_committee_member(self, member_address: str, allowed: bool) -> bool:
         if gl.message.sender_address != self.owner:
             raise gl.UserError(f"{ERROR_EXPECTED} Only owner")
-        if member_address not in self.committee_members:
-            self.committee_member_order.append(member_address)
-        self.committee_members[member_address] = allowed
+        member_key = _address_text(member_address)
+        if member_key not in self.committee_members:
+            self.committee_member_order.append(member_key)
+        self.committee_members[member_key] = allowed
         return True
 
     @gl.public.write
     def configure_arc_treasury(self, arc_treasury_address: str, usdc_token_address: str) -> bool:
         if gl.message.sender_address != self.owner:
             raise gl.UserError(f"{ERROR_EXPECTED} Only owner")
-        self.arc_treasury_address = arc_treasury_address[:80]
-        self.usdc_token_address = usdc_token_address[:80]
+        self.arc_treasury_address = _address_text(arc_treasury_address)[:80]
+        self.usdc_token_address = _address_text(usdc_token_address)[:80]
         return True
 
     @gl.public.write
