@@ -3,7 +3,7 @@ import { createClient } from "genlayer-js";
 
 export const CONTRACT_ADDRESS =
   (import.meta.env.VITE_GRANT_ALLOCATOR_ADDRESS as string | undefined) ||
-  "0xd040a94FE902A2ac88E52412fF7fb1c4D7451e61";
+  "0x934999b9ff5f1038034D7cd1fb0a49fc20Fd07B4";
 export const ARC_TREASURY_ADDRESS =
   (import.meta.env.VITE_ARC_TREASURY_ADDRESS as string | undefined) || "0x2CeB0BECDC1B3cd6b0441aa57Fa7Ac05291ACaEb";
 export const ARC_USDC_TOKEN_ADDRESS =

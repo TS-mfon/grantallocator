@@ -1,6 +1,5 @@
-# {"Depends": "py-genlayer:test"}
+# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 
-from dataclasses import dataclass
 import json
 
 from genlayer import *
@@ -8,6 +7,19 @@ from genlayer import *
 
 ERROR_EXPECTED = "[EXPECTED]"
 ERROR_LLM = "[LLM_ERROR]"
+
+
+def _json_load(raw: str, fallback):
+    if not raw:
+        return fallback
+    try:
+        return json.loads(raw)
+    except Exception:
+        return fallback
+
+
+def _json_dump(data) -> str:
+    return json.dumps(data, sort_keys=True, separators=(",", ":"))
 
 
 def _address_text(value) -> str:
@@ -21,53 +33,16 @@ def _address_text(value) -> str:
     return text
 
 
-def _parse_json_dict(raw: str) -> dict:
-    if not raw:
-        return {}
+def _vote_key(proposal_id: str, member_address: str) -> str:
+    return proposal_id + ":" + _address_text(member_address)
+
+
+def _clamp_int(value, low: int, high: int) -> int:
     try:
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else {}
+        parsed = int(float(str(value).strip()))
     except Exception:
-        return {}
-
-
-def _parse_json_list(raw: str) -> list:
-    if not raw:
-        return []
-    try:
-        data = json.loads(raw)
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
-
-
-def _vote_key(proposal_id: str, member_address: Address) -> str:
-    return proposal_id + ":" + member_address.as_hex
-
-
-@allow_storage
-@dataclass
-class Proposal:
-    applicant: str
-    title: str
-    description: str
-    requested_amount_usd_cents: u256
-    team_background: str
-    team_links_json: str
-    milestones_json: str
-    market_context_json: str
-    due_diligence_json: str
-    status: str
-    ai_packet_json: str
-    committee_votes_for: u256
-    committee_votes_against: u256
-    committee_votes_abstain: u256
-    created_tick: u256
-    vote_end_tick: u256
-    executed: bool
-    approved_amount_usd_cents: u256
-    released_amount_usd_cents: u256
-    arc_grant_id: str
+        parsed = low
+    return max(low, min(high, parsed))
 
 
 class GrantAllocatorDAO(gl.Contract):
@@ -81,7 +56,7 @@ class GrantAllocatorDAO(gl.Contract):
     usdc_token_address: str
     proposal_nonce: u256
     tick: u256
-    proposals: TreeMap[str, Proposal]
+    proposals: TreeMap[str, str]
     proposal_order: DynArray[str]
     member_votes: TreeMap[str, str]
     committee_members: TreeMap[str, bool]
@@ -109,54 +84,130 @@ class GrantAllocatorDAO(gl.Contract):
         self.proposal_nonce = 0
         self.tick = 0
 
-    def _next_tick(self) -> u256:
+    def _only_owner(self) -> None:
+        if gl.message.sender_address != self.owner:
+            raise gl.UserError(f"{ERROR_EXPECTED} Only owner")
+
+    def _next_tick(self) -> int:
         self.tick += 1
-        return self.tick
+        return int(self.tick)
 
-    def _is_committee_or_owner(self, member: Address) -> bool:
-        if member == self.owner:
+    def _is_committee_or_owner(self, member_address: str) -> bool:
+        member = _address_text(member_address)
+        if member == self.owner.as_hex:
             return True
-        return bool(self.committee_members.get(member.as_hex, False))
+        return bool(self.committee_members.get(member, False))
 
-    def _proposal_to_dict(self, proposal_id: str, proposal: Proposal) -> dict:
+    def _get_proposal(self, proposal_id: str) -> dict:
+        if proposal_id not in self.proposals:
+            return {}
+        return _json_load(self.proposals[proposal_id], {})
+
+    def _save_proposal(self, proposal_id: str, proposal: dict) -> None:
+        self.proposals[proposal_id] = _json_dump(proposal)
+
+    def _normalize_milestones(self, raw: str) -> list:
+        data = _json_load(raw, [])
+        if not isinstance(data, list):
+            return []
+        normalized = []
+        for index, item in enumerate(data):
+            milestone = item if isinstance(item, dict) else {}
+            amount = _clamp_int(milestone.get("amount_usd_cents", 0), 0, 10_000_000_000)
+            normalized.append(
+                {
+                    "milestone_id": str(milestone.get("milestone_id", "ms-" + str(index + 1)))[:80],
+                    "title": str(milestone.get("title", "Milestone " + str(index + 1)))[:160],
+                    "description": str(milestone.get("description", ""))[:1000],
+                    "expected_deliverables": str(milestone.get("expected_deliverables", ""))[:1000],
+                    "amount_usd_cents": amount,
+                    "status": str(milestone.get("status", "PLANNED"))[:80],
+                    "paid": bool(milestone.get("paid", False)),
+                }
+            )
+        return normalized
+
+    def _packet_from_scores(self, requested_amount: int, impact: int, feasibility: int, alignment: int, market: int, narrative: int, trust: int, rationale: str, flags) -> dict:
+        composite = impact + feasibility + alignment + market + narrative + trust
         return {
-            "proposal_id": proposal_id,
-            "applicant": proposal.applicant,
-            "title": proposal.title,
-            "description": proposal.description,
-            "requested_amount_usd_cents": int(proposal.requested_amount_usd_cents),
-            "team_background": proposal.team_background,
-            "team_links": _parse_json_dict(proposal.team_links_json),
-            "milestones": _parse_json_list(proposal.milestones_json),
-            "market_context": _parse_json_dict(proposal.market_context_json),
-            "due_diligence": _parse_json_dict(proposal.due_diligence_json),
-            "status": proposal.status,
-            "ai_packet": _parse_json_dict(proposal.ai_packet_json),
-            "committee_votes_for": int(proposal.committee_votes_for),
-            "committee_votes_against": int(proposal.committee_votes_against),
-            "committee_votes_abstain": int(proposal.committee_votes_abstain),
-            "executed": proposal.executed,
-            "approved_amount_usd_cents": int(proposal.approved_amount_usd_cents),
-            "released_amount_usd_cents": int(proposal.released_amount_usd_cents),
-            "arc_grant_id": proposal.arc_grant_id,
+            "impact": impact,
+            "feasibility": feasibility,
+            "alignment": alignment,
+            "market_sentiment": market,
+            "narrative_fit": narrative,
+            "trust_score": trust,
+            "composite": composite,
+            "recommended_amount_usd_cents": min(max(0, requested_amount), requested_amount),
+            "rationale": rationale[:1500],
+            "risk_flags": flags if isinstance(flags, list) else [],
         }
 
-    def _evaluate_proposal(self, proposal_id: str) -> dict:
-        proposal = self.proposals[proposal_id]
+    def _create_application(
+        self,
+        applicant: str,
+        title: str,
+        description: str,
+        requested_amount_usd_cents: int,
+        team_background: str,
+        team_links_json: str,
+        milestones_json: str,
+        market_context_json: str,
+        due_diligence_json: str,
+        status: str,
+        ai_packet: dict,
+        votes_for: int,
+        votes_against: int,
+        votes_abstain: int,
+        executed: bool,
+        approved_amount: int,
+        released_amount: int,
+        arc_grant_id: str,
+    ) -> str:
+        proposal_id = "proposal-" + str(int(self.proposal_nonce))
+        self.proposal_nonce += 1
+        created_tick = self._next_tick()
+        requested = max(0, int(requested_amount_usd_cents))
+        proposal = {
+            "proposal_id": proposal_id,
+            "applicant": _address_text(applicant),
+            "title": title[:120],
+            "description": description[:2500],
+            "requested_amount_usd_cents": requested,
+            "team_background": team_background[:1200],
+            "team_links": _json_load(team_links_json, {}),
+            "milestones": self._normalize_milestones(milestones_json),
+            "market_context": _json_load(market_context_json, {}),
+            "due_diligence": _json_load(due_diligence_json, {}),
+            "status": status[:80],
+            "ai_packet": ai_packet,
+            "committee_votes_for": int(votes_for),
+            "committee_votes_against": int(votes_against),
+            "committee_votes_abstain": int(votes_abstain),
+            "created_tick": created_tick,
+            "vote_end_tick": created_tick + int(self.voting_period),
+            "executed": bool(executed),
+            "approved_amount_usd_cents": max(0, int(approved_amount)),
+            "released_amount_usd_cents": max(0, int(released_amount)),
+            "arc_grant_id": arc_grant_id[:120],
+        }
+        self.proposals[proposal_id] = _json_dump(proposal)
+        self.proposal_order.append(proposal_id)
+        return proposal_id
 
+    def _evaluate_proposal(self, proposal: dict) -> dict:
         def leader_fn():
             prompt = f"""
 Mission: {self.dao_mission}
 
 Application:
-Title: {proposal.title}
-Description: {proposal.description}
-Requested USD Cents: {int(proposal.requested_amount_usd_cents)}
-Team Background: {proposal.team_background}
-Team Links JSON: {proposal.team_links_json}
-Milestones JSON: {proposal.milestones_json}
-Market Context JSON: {proposal.market_context_json}
-Due Diligence JSON: {proposal.due_diligence_json}
+Title: {proposal.get("title", "")}
+Description: {proposal.get("description", "")}
+Requested USD Cents: {proposal.get("requested_amount_usd_cents", 0)}
+Team Background: {proposal.get("team_background", "")}
+Team Links JSON: {_json_dump(proposal.get("team_links", {}))}
+Milestones JSON: {_json_dump(proposal.get("milestones", []))}
+Market Context JSON: {_json_dump(proposal.get("market_context", {}))}
+Due Diligence JSON: {_json_dump(proposal.get("due_diligence", {}))}
 
 Return JSON only:
 {{
@@ -166,7 +217,6 @@ Return JSON only:
   "market_sentiment": 0-10,
   "narrative_fit": 0-10,
   "trust_score": 0-15,
-  "composite": 0-100,
   "recommended_amount_usd_cents": 0,
   "rationale": "short explanation",
   "risk_flags": ["flag"]
@@ -175,36 +225,23 @@ Return JSON only:
             result = gl.nondet.exec_prompt(prompt, response_format="json")
             if not isinstance(result, dict):
                 raise gl.vm.UserError(f"{ERROR_LLM} Non-dict response")
-            rationale = str(result.get("rationale", "")).strip()[:1500]
+            rationale = str(result.get("rationale", "")).strip()
             if not rationale:
                 raise gl.vm.UserError(f"{ERROR_LLM} missing rationale")
-            risk_flags = result.get("risk_flags", [])
-            if not isinstance(risk_flags, list):
-                risk_flags = []
-
-            def _clamp(field: str, low: int, high: int) -> int:
-                return max(low, min(high, int(float(str(result.get(field, 0)).strip()))))
-
-            impact = _clamp("impact", 0, 25)
-            feasibility = _clamp("feasibility", 0, 20)
-            alignment = _clamp("alignment", 0, 20)
-            market_sentiment = _clamp("market_sentiment", 0, 10)
-            narrative_fit = _clamp("narrative_fit", 0, 10)
-            trust_score = _clamp("trust_score", 0, 15)
-            recommended = max(0, int(float(str(result.get("recommended_amount_usd_cents", 0)).strip())))
-            composite = impact + feasibility + alignment + market_sentiment + narrative_fit + trust_score
-            return {
-                "impact": impact,
-                "feasibility": feasibility,
-                "alignment": alignment,
-                "market_sentiment": market_sentiment,
-                "narrative_fit": narrative_fit,
-                "trust_score": trust_score,
-                "composite": composite,
-                "recommended_amount_usd_cents": min(recommended, int(proposal.requested_amount_usd_cents)),
-                "rationale": rationale,
-                "risk_flags": [str(flag)[:160] for flag in risk_flags[:6]],
-            }
+            flags = result.get("risk_flags", [])
+            if not isinstance(flags, list):
+                flags = []
+            return self._packet_from_scores(
+                int(proposal.get("requested_amount_usd_cents", 0)),
+                _clamp_int(result.get("impact", 0), 0, 25),
+                _clamp_int(result.get("feasibility", 0), 0, 20),
+                _clamp_int(result.get("alignment", 0), 0, 20),
+                _clamp_int(result.get("market_sentiment", 0), 0, 10),
+                _clamp_int(result.get("narrative_fit", 0), 0, 10),
+                _clamp_int(result.get("trust_score", 0), 0, 15),
+                rationale,
+                [str(flag)[:160] for flag in flags[:6]],
+            )
 
         def validator_fn(leaders_res: gl.vm.Result) -> bool:
             if not isinstance(leaders_res, gl.vm.Return):
@@ -215,24 +252,14 @@ Return JSON only:
 
         return gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
 
-    def _review_milestone(self, proposal_id: str, milestone_id: str) -> dict:
-        proposal = self.proposals[proposal_id]
-        milestones = _parse_json_list(proposal.milestones_json)
-        target = None
-        for milestone in milestones:
-            if isinstance(milestone, dict) and str(milestone.get("milestone_id", "")) == milestone_id:
-                target = milestone
-                break
-        if not isinstance(target, dict):
-            raise gl.UserError(f"{ERROR_EXPECTED} Milestone not found")
-
+    def _review_milestone(self, proposal: dict, milestone: dict) -> dict:
         def leader_fn():
             prompt = f"""
 Grant Mission: {self.dao_mission}
-Proposal Title: {proposal.title}
-Milestone JSON: {json.dumps(target, sort_keys=True)}
-Due Diligence JSON: {proposal.due_diligence_json}
-Market Context JSON: {proposal.market_context_json}
+Proposal Title: {proposal.get("title", "")}
+Milestone JSON: {_json_dump(milestone)}
+Due Diligence JSON: {_json_dump(proposal.get("due_diligence", {}))}
+Market Context JSON: {_json_dump(proposal.get("market_context", {}))}
 
 Return JSON only:
 {{
@@ -245,18 +272,18 @@ Return JSON only:
             result = gl.nondet.exec_prompt(prompt, response_format="json")
             if not isinstance(result, dict):
                 raise gl.vm.UserError(f"{ERROR_LLM} Non-dict response")
-            summary = str(result.get("summary", "")).strip()[:1000]
+            summary = str(result.get("summary", "")).strip()
             if not summary:
                 raise gl.vm.UserError(f"{ERROR_LLM} missing summary")
-            completion_score = max(0, min(100, int(float(str(result.get("completion_score", 0)).strip()))))
-            risk_flags = result.get("risk_flags", [])
-            if not isinstance(risk_flags, list):
-                risk_flags = []
+            flags = result.get("risk_flags", [])
+            if not isinstance(flags, list):
+                flags = []
+            score = _clamp_int(result.get("completion_score", 0), 0, 100)
             return {
-                "completion_score": completion_score,
-                "release_recommendation": bool(result.get("release_recommendation", completion_score >= 70)),
-                "summary": summary,
-                "risk_flags": [str(flag)[:160] for flag in risk_flags[:5]],
+                "completion_score": score,
+                "release_recommendation": bool(result.get("release_recommendation", score >= 70)),
+                "summary": summary[:1000],
+                "risk_flags": [str(flag)[:160] for flag in flags[:5]],
             }
 
         def validator_fn(leaders_res: gl.vm.Result) -> bool:
@@ -270,18 +297,16 @@ Return JSON only:
 
     @gl.public.write
     def set_committee_member(self, member_address: str, allowed: bool) -> bool:
-        if gl.message.sender_address != self.owner:
-            raise gl.UserError(f"{ERROR_EXPECTED} Only owner")
+        self._only_owner()
         member_key = _address_text(member_address)
         if member_key not in self.committee_members:
             self.committee_member_order.append(member_key)
-        self.committee_members[member_key] = allowed
+        self.committee_members[member_key] = bool(allowed)
         return True
 
     @gl.public.write
     def configure_arc_treasury(self, arc_treasury_address: str, usdc_token_address: str) -> bool:
-        if gl.message.sender_address != self.owner:
-            raise gl.UserError(f"{ERROR_EXPECTED} Only owner")
+        self._only_owner()
         self.arc_treasury_address = _address_text(arc_treasury_address)[:80]
         self.usdc_token_address = _address_text(usdc_token_address)[:80]
         return True
@@ -298,195 +323,399 @@ Return JSON only:
         market_context_json: str,
         due_diligence_json: str,
     ) -> str:
-        proposal_id = "proposal-" + str(int(self.proposal_nonce))
-        self.proposal_nonce += 1
-        created_tick = self._next_tick()
-        proposal = Proposal(
-            applicant=gl.message.sender_address.as_hex,
-            title=title[:120],
-            description=description[:2500],
-            requested_amount_usd_cents=requested_amount_usd_cents,
-            team_background=team_background[:1200],
-            team_links_json=team_links_json[:3000],
-            milestones_json=milestones_json[:12000],
-            market_context_json=market_context_json[:3000],
-            due_diligence_json=due_diligence_json[:5000],
-            status="PENDING_EVALUATION",
-            ai_packet_json="{}",
-            committee_votes_for=u256(0),
-            committee_votes_against=u256(0),
-            committee_votes_abstain=u256(0),
-            created_tick=created_tick,
-            vote_end_tick=created_tick + int(self.voting_period),
-            executed=False,
-            approved_amount_usd_cents=u256(0),
-            released_amount_usd_cents=u256(0),
-            arc_grant_id="",
+        proposal_id = self._create_application(
+            gl.message.sender_address.as_hex,
+            title,
+            description,
+            int(requested_amount_usd_cents),
+            team_background,
+            team_links_json,
+            milestones_json,
+            market_context_json,
+            due_diligence_json,
+            "PENDING_EVALUATION",
+            {},
+            0,
+            0,
+            0,
+            False,
+            0,
+            0,
+            "",
         )
-        self.proposals[proposal_id] = proposal
-        self.proposal_order.append(proposal_id)
-
-        ai_packet = self._evaluate_proposal(proposal_id)
-        proposal.ai_packet_json = json.dumps(ai_packet, sort_keys=True)
-        proposal.approved_amount_usd_cents = u256(int(ai_packet.get("recommended_amount_usd_cents", 0)))
-        proposal.status = "PENDING_VOTE" if int(ai_packet.get("composite", 0)) >= int(self.score_threshold) else "REJECTED_BY_AI"
-        self.proposals[proposal_id] = proposal
+        proposal = self._get_proposal(proposal_id)
+        ai_packet = self._evaluate_proposal(proposal)
+        proposal["ai_packet"] = ai_packet
+        proposal["approved_amount_usd_cents"] = int(ai_packet.get("recommended_amount_usd_cents", 0))
+        proposal["status"] = "PENDING_VOTE" if int(ai_packet.get("composite", 0)) >= int(self.score_threshold) else "REJECTED_BY_AI"
+        self._save_proposal(proposal_id, proposal)
         return proposal_id
 
     @gl.public.write
+    def seed_application(
+        self,
+        title: str,
+        description: str,
+        requested_amount_usd_cents: u256,
+        team_background: str,
+        team_links_json: str,
+        milestones_json: str,
+        market_context_json: str,
+        due_diligence_json: str,
+        status: str,
+        ai_packet_json: str,
+        votes_for: u256,
+        votes_against: u256,
+        votes_abstain: u256,
+        executed: bool,
+        released_amount_usd_cents: u256,
+    ) -> str:
+        self._only_owner()
+        requested = int(requested_amount_usd_cents)
+        ai_packet = _json_load(ai_packet_json, {})
+        if not isinstance(ai_packet, dict) or not ai_packet:
+            ai_packet = self._packet_from_scores(
+                requested,
+                20,
+                16,
+                17,
+                7,
+                8,
+                12,
+                "Seeded AI packet for UI and contract testing.",
+                [],
+            )
+        approved = int(ai_packet.get("recommended_amount_usd_cents", requested))
+        return self._create_application(
+            self.owner.as_hex,
+            title,
+            description,
+            requested,
+            team_background,
+            team_links_json,
+            milestones_json,
+            market_context_json,
+            due_diligence_json,
+            status,
+            ai_packet,
+            int(votes_for),
+            int(votes_against),
+            int(votes_abstain),
+            bool(executed),
+            approved,
+            int(released_amount_usd_cents),
+            "arc-grant-seed-" + str(int(self.proposal_nonce)),
+        )
+
+    @gl.public.write
+    def seed_demo_applications(self, count: u256) -> int:
+        self._only_owner()
+        total = min(max(0, int(count)), 60)
+        for index in range(total):
+            requested = 2500000 + (index * 175000)
+            if index < 8:
+                status = "PENDING_VOTE"
+                executed = False
+                released = 0
+            elif index < 14:
+                status = "APPROVED"
+                executed = True
+                released = 0
+            elif index < 19:
+                status = "ACTIVE_MILESTONES"
+                executed = True
+                released = requested // 3
+            elif index < 24:
+                status = "READY_FOR_RELEASE"
+                executed = True
+                released = requested // 2
+            elif index < 27:
+                status = "COMPLETED"
+                executed = True
+                released = requested
+            else:
+                status = "REJECTED_BY_AI"
+                executed = False
+                released = 0
+
+            milestones = _json_dump(
+                [
+                    {
+                        "milestone_id": "ms-1",
+                        "title": "Prototype and public demo",
+                        "description": "Ship a working prototype and publish a technical walkthrough.",
+                        "expected_deliverables": "Demo URL, repo, and deployment notes.",
+                        "amount_usd_cents": requested // 3,
+                        "status": "PAID" if released > 0 else "PLANNED",
+                        "paid": released > 0,
+                    },
+                    {
+                        "milestone_id": "ms-2",
+                        "title": "Security and growth checkpoint",
+                        "description": "Complete audit fixes, user testing, and adoption report.",
+                        "expected_deliverables": "Audit notes, usage dashboard, and milestone evidence.",
+                        "amount_usd_cents": requested // 3,
+                        "status": "UNDER_REVIEW" if status == "READY_FOR_RELEASE" else "PLANNED",
+                        "paid": False,
+                    },
+                    {
+                        "milestone_id": "ms-3",
+                        "title": "Mainnet-ready handoff",
+                        "description": "Finalize operations, docs, and treasury reporting.",
+                        "expected_deliverables": "Runbook, KPI report, and final release evidence.",
+                        "amount_usd_cents": requested - ((requested // 3) * 2),
+                        "status": "PAID" if status == "COMPLETED" else "PLANNED",
+                        "paid": status == "COMPLETED",
+                    },
+                ]
+            )
+            market = _json_dump(
+                {
+                    "source": "CryptoRank.io",
+                    "trend": "AI x DeFi infrastructure",
+                    "sentiment": "bullish" if index % 3 != 0 else "neutral",
+                    "narrative_strength": 80 - (index % 7),
+                }
+            )
+            due_diligence = _json_dump(
+                {
+                    "team_check": "clean",
+                    "identity_notes": "Seeded background check found no critical red flags.",
+                    "trust_score": 76 + (index % 14),
+                }
+            )
+            ai_packet = _json_dump(
+                self._packet_from_scores(
+                    requested,
+                    18 + (index % 7),
+                    14 + (index % 6),
+                    15 + (index % 5),
+                    6 + (index % 4),
+                    7 + (index % 3),
+                    11 + (index % 5),
+                    "Seeded AI evaluation with market sentiment, narrative fit, and team background checks.",
+                    [] if status != "REJECTED_BY_AI" else ["Trust score below threshold", "Insufficient milestone specificity"],
+                )
+            )
+            self.seed_application(
+                "Grant Application " + str(index + 1),
+                "Seeded grant for testing AI screening, committee voting, USD pool accounting, and milestone-gated disbursement.",
+                requested,
+                "Experienced builders with public repositories, prior grants, and clean diligence profile.",
+                _json_dump({"github": "https://github.com/example/team-" + str(index + 1), "website": "https://example.org/grant-" + str(index + 1)}),
+                milestones,
+                market,
+                due_diligence,
+                status,
+                ai_packet,
+                3 + (index % 8),
+                index % 3,
+                index % 2,
+                executed,
+                released,
+            )
+        return int(self.proposal_nonce)
+
+    @gl.public.write
+    def seed_ai_packet(self, proposal_id: str, ai_packet_json: str, status: str) -> bool:
+        self._only_owner()
+        proposal = self._get_proposal(proposal_id)
+        if not proposal:
+            raise gl.UserError(f"{ERROR_EXPECTED} Unknown proposal")
+        packet = _json_load(ai_packet_json, {})
+        if not isinstance(packet, dict):
+            raise gl.UserError(f"{ERROR_EXPECTED} Invalid packet")
+        proposal["ai_packet"] = packet
+        proposal["approved_amount_usd_cents"] = int(packet.get("recommended_amount_usd_cents", 0))
+        proposal["status"] = status[:80]
+        self._save_proposal(proposal_id, proposal)
+        return True
+
+    @gl.public.write
+    def seed_milestone_state(self, proposal_id: str, milestone_id: str, status: str, completion_score: u256, paid: bool, arc_tx_hash: str) -> bool:
+        self._only_owner()
+        proposal = self._get_proposal(proposal_id)
+        if not proposal:
+            raise gl.UserError(f"{ERROR_EXPECTED} Unknown proposal")
+        milestones = proposal.get("milestones", [])
+        updated = []
+        found = False
+        for milestone in milestones:
+            item = milestone if isinstance(milestone, dict) else {}
+            if str(item.get("milestone_id", "")) == milestone_id:
+                item["status"] = status[:80]
+                item["paid"] = bool(paid)
+                item["arc_tx_hash"] = arc_tx_hash[:160]
+                item["ai_review"] = {
+                    "completion_score": int(completion_score),
+                    "release_recommendation": int(completion_score) >= 70,
+                    "summary": "Seeded milestone review for UI testing.",
+                    "risk_flags": [],
+                }
+                found = True
+            updated.append(item)
+        if not found:
+            raise gl.UserError(f"{ERROR_EXPECTED} Milestone not found")
+        proposal["milestones"] = updated
+        self._save_proposal(proposal_id, proposal)
+        return True
+
+    @gl.public.write
     def cast_vote(self, proposal_id: str, vote: str) -> str:
-        if proposal_id not in self.proposals:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Unknown proposal")
-        proposal = self.proposals[proposal_id]
-        if proposal.status != "PENDING_VOTE":
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Proposal not open for voting")
-        if not self._is_committee_or_owner(gl.message.sender_address):
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Not committee")
-        vote_key = _vote_key(proposal_id, gl.message.sender_address)
+        proposal = self._get_proposal(proposal_id)
+        if not proposal:
+            raise gl.UserError(f"{ERROR_EXPECTED} Unknown proposal")
+        if proposal.get("status") != "PENDING_VOTE":
+            raise gl.UserError(f"{ERROR_EXPECTED} Proposal not open for voting")
+        if not self._is_committee_or_owner(gl.message.sender_address.as_hex):
+            raise gl.UserError(f"{ERROR_EXPECTED} Not committee")
+        vote_key = _vote_key(proposal_id, gl.message.sender_address.as_hex)
         if vote_key in self.member_votes:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Already voted")
+            raise gl.UserError(f"{ERROR_EXPECTED} Already voted")
         normalized = vote.strip().upper()
         if normalized not in ["FOR", "AGAINST", "ABSTAIN"]:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Invalid vote")
+            raise gl.UserError(f"{ERROR_EXPECTED} Invalid vote")
         self.member_votes[vote_key] = normalized
+        field = "committee_votes_abstain"
         if normalized == "FOR":
-            proposal.committee_votes_for += 1
+            field = "committee_votes_for"
         elif normalized == "AGAINST":
-            proposal.committee_votes_against += 1
-        else:
-            proposal.committee_votes_abstain += 1
-        self.proposals[proposal_id] = proposal
+            field = "committee_votes_against"
+        proposal[field] = int(proposal.get(field, 0)) + 1
+        self._save_proposal(proposal_id, proposal)
         return "vote-recorded"
 
     @gl.public.write
     def execute_proposal(self, proposal_id: str) -> str:
-        if proposal_id not in self.proposals:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Unknown proposal")
-        proposal = self.proposals[proposal_id]
-        if proposal.status != "PENDING_VOTE":
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Proposal not in voting state")
-        if proposal.executed:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Proposal already executed")
-        total_votes = int(proposal.committee_votes_for) + int(proposal.committee_votes_against) + int(proposal.committee_votes_abstain)
+        proposal = self._get_proposal(proposal_id)
+        if not proposal:
+            raise gl.UserError(f"{ERROR_EXPECTED} Unknown proposal")
+        if proposal.get("status") != "PENDING_VOTE":
+            raise gl.UserError(f"{ERROR_EXPECTED} Proposal not in voting state")
+        if proposal.get("executed", False):
+            raise gl.UserError(f"{ERROR_EXPECTED} Proposal already executed")
+        total_votes = int(proposal.get("committee_votes_for", 0)) + int(proposal.get("committee_votes_against", 0)) + int(proposal.get("committee_votes_abstain", 0))
         if total_votes < int(self.quorum):
-            proposal.status = "LAPSED"
-            self.proposals[proposal_id] = proposal
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Quorum not met")
-        if int(proposal.committee_votes_for) <= int(proposal.committee_votes_against):
-            proposal.status = "REJECTED"
-            self.proposals[proposal_id] = proposal
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Proposal did not pass")
-        if int(self.treasury_balance_usd_cents) < int(proposal.approved_amount_usd_cents):
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Insufficient treasury")
-        proposal.status = "APPROVED"
-        proposal.executed = True
-        proposal.arc_grant_id = "arc-grant-" + proposal_id
-        self.proposals[proposal_id] = proposal
+            proposal["status"] = "LAPSED"
+            self._save_proposal(proposal_id, proposal)
+            raise gl.UserError(f"{ERROR_EXPECTED} Quorum not met")
+        if int(proposal.get("committee_votes_for", 0)) <= int(proposal.get("committee_votes_against", 0)):
+            proposal["status"] = "REJECTED"
+            self._save_proposal(proposal_id, proposal)
+            raise gl.UserError(f"{ERROR_EXPECTED} Proposal did not pass")
+        if int(self.treasury_balance_usd_cents) < int(proposal.get("approved_amount_usd_cents", 0)):
+            raise gl.UserError(f"{ERROR_EXPECTED} Insufficient treasury")
+        proposal["status"] = "APPROVED"
+        proposal["executed"] = True
+        proposal["arc_grant_id"] = "arc-grant-" + proposal_id
+        self._save_proposal(proposal_id, proposal)
         self.disbursement_history.append(
-            json.dumps(
+            _json_dump(
                 {
                     "type": "grant_approved",
                     "proposal_id": proposal_id,
-                    "approved_amount_usd_cents": int(proposal.approved_amount_usd_cents),
-                    "arc_grant_id": proposal.arc_grant_id,
-                },
-                sort_keys=True,
+                    "approved_amount_usd_cents": int(proposal.get("approved_amount_usd_cents", 0)),
+                    "arc_grant_id": proposal.get("arc_grant_id", ""),
+                }
             )
         )
         return "proposal-approved"
 
     @gl.public.write
     def submit_milestone_evidence(self, proposal_id: str, milestone_id: str, evidence_uri: str, note: str) -> bool:
-        if proposal_id not in self.proposals:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Unknown proposal")
-        proposal = self.proposals[proposal_id]
-        if proposal.applicant != gl.message.sender_address.as_hex:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only applicant")
-        milestones = _parse_json_list(proposal.milestones_json)
+        proposal = self._get_proposal(proposal_id)
+        if not proposal:
+            raise gl.UserError(f"{ERROR_EXPECTED} Unknown proposal")
+        if proposal.get("applicant") != gl.message.sender_address.as_hex:
+            raise gl.UserError(f"{ERROR_EXPECTED} Only applicant")
+        milestones = proposal.get("milestones", [])
         updated = []
         found = False
-        for item in milestones:
-            milestone = item if isinstance(item, dict) else {}
-            if str(milestone.get("milestone_id", "")) == milestone_id:
-                milestone["evidence_uri"] = evidence_uri[:500]
-                milestone["evidence_note"] = note[:500]
-                milestone["status"] = "EVIDENCE_SUBMITTED"
+        for milestone in milestones:
+            item = milestone if isinstance(milestone, dict) else {}
+            if str(item.get("milestone_id", "")) == milestone_id:
+                item["evidence_uri"] = evidence_uri[:500]
+                item["evidence_note"] = note[:500]
+                item["status"] = "EVIDENCE_SUBMITTED"
                 found = True
-            updated.append(milestone)
+            updated.append(item)
         if not found:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Milestone not found")
-        proposal.milestones_json = json.dumps(updated, sort_keys=True)
-        proposal.status = "MILESTONE_REVIEW"
-        self.proposals[proposal_id] = proposal
+            raise gl.UserError(f"{ERROR_EXPECTED} Milestone not found")
+        proposal["milestones"] = updated
+        proposal["status"] = "MILESTONE_REVIEW"
+        self._save_proposal(proposal_id, proposal)
         return True
 
     @gl.public.write
     def review_milestone(self, proposal_id: str, milestone_id: str) -> dict:
-        if proposal_id not in self.proposals:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Unknown proposal")
-        proposal = self.proposals[proposal_id]
-        result = self._review_milestone(proposal_id, milestone_id)
-        milestones = _parse_json_list(proposal.milestones_json)
+        proposal = self._get_proposal(proposal_id)
+        if not proposal:
+            raise gl.UserError(f"{ERROR_EXPECTED} Unknown proposal")
+        target = {}
+        for milestone in proposal.get("milestones", []):
+            item = milestone if isinstance(milestone, dict) else {}
+            if str(item.get("milestone_id", "")) == milestone_id:
+                target = item
+        if not target:
+            raise gl.UserError(f"{ERROR_EXPECTED} Milestone not found")
+        result = self._review_milestone(proposal, target)
         updated = []
-        for item in milestones:
-            milestone = item if isinstance(item, dict) else {}
-            if str(milestone.get("milestone_id", "")) == milestone_id:
-                milestone["ai_review"] = result
-                milestone["status"] = "READY_FOR_RELEASE" if result.get("release_recommendation", False) else "REVISION_REQUESTED"
-            updated.append(milestone)
-        proposal.milestones_json = json.dumps(updated, sort_keys=True)
-        proposal.status = "READY_FOR_RELEASE" if result.get("release_recommendation", False) else "REVISION_REQUESTED"
-        self.proposals[proposal_id] = proposal
+        for milestone in proposal.get("milestones", []):
+            item = milestone if isinstance(milestone, dict) else {}
+            if str(item.get("milestone_id", "")) == milestone_id:
+                item["ai_review"] = result
+                item["status"] = "READY_FOR_RELEASE" if result.get("release_recommendation", False) else "REVISION_REQUESTED"
+            updated.append(item)
+        proposal["milestones"] = updated
+        proposal["status"] = "READY_FOR_RELEASE" if result.get("release_recommendation", False) else "REVISION_REQUESTED"
+        self._save_proposal(proposal_id, proposal)
         return result
 
     @gl.public.write
     def release_tranche(self, proposal_id: str, milestone_id: str, arc_tx_hash: str) -> bool:
-        if gl.message.sender_address != self.owner:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner")
-        if proposal_id not in self.proposals:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Unknown proposal")
-        proposal = self.proposals[proposal_id]
-        if proposal.status not in ["READY_FOR_RELEASE", "ACTIVE_MILESTONES", "APPROVED"]:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Proposal not ready for release")
-        milestones = _parse_json_list(proposal.milestones_json)
+        self._only_owner()
+        proposal = self._get_proposal(proposal_id)
+        if not proposal:
+            raise gl.UserError(f"{ERROR_EXPECTED} Unknown proposal")
+        if proposal.get("status") not in ["READY_FOR_RELEASE", "ACTIVE_MILESTONES", "APPROVED"]:
+            raise gl.UserError(f"{ERROR_EXPECTED} Proposal not ready for release")
         updated = []
         release_amount = 0
         found = False
         all_paid = True
-        for item in milestones:
-            milestone = item if isinstance(item, dict) else {}
-            if str(milestone.get("milestone_id", "")) == milestone_id:
-                if milestone.get("status") != "READY_FOR_RELEASE":
-                    raise gl.vm.UserError(f"{ERROR_EXPECTED} Milestone not ready")
-                if milestone.get("paid", False):
-                    raise gl.vm.UserError(f"{ERROR_EXPECTED} Milestone already paid")
-                release_amount = int(milestone.get("amount_usd_cents", 0))
-                milestone["paid"] = True
-                milestone["arc_tx_hash"] = arc_tx_hash[:160]
-                milestone["status"] = "PAID"
+        for milestone in proposal.get("milestones", []):
+            item = milestone if isinstance(milestone, dict) else {}
+            if str(item.get("milestone_id", "")) == milestone_id:
+                if item.get("status") != "READY_FOR_RELEASE":
+                    raise gl.UserError(f"{ERROR_EXPECTED} Milestone not ready")
+                if item.get("paid", False):
+                    raise gl.UserError(f"{ERROR_EXPECTED} Milestone already paid")
+                release_amount = int(item.get("amount_usd_cents", 0))
+                item["paid"] = True
+                item["arc_tx_hash"] = arc_tx_hash[:160]
+                item["status"] = "PAID"
                 found = True
-            if milestone.get("status") != "PAID":
+            if item.get("status") != "PAID":
                 all_paid = False
-            updated.append(milestone)
+            updated.append(item)
         if not found:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Milestone not found")
+            raise gl.UserError(f"{ERROR_EXPECTED} Milestone not found")
         if int(self.treasury_balance_usd_cents) < release_amount:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Insufficient treasury")
+            raise gl.UserError(f"{ERROR_EXPECTED} Insufficient treasury")
         self.treasury_balance_usd_cents -= release_amount
-        proposal.released_amount_usd_cents += release_amount
-        proposal.milestones_json = json.dumps(updated, sort_keys=True)
-        proposal.status = "COMPLETED" if all_paid else "ACTIVE_MILESTONES"
-        self.proposals[proposal_id] = proposal
+        proposal["released_amount_usd_cents"] = int(proposal.get("released_amount_usd_cents", 0)) + release_amount
+        proposal["milestones"] = updated
+        proposal["status"] = "COMPLETED" if all_paid else "ACTIVE_MILESTONES"
+        self._save_proposal(proposal_id, proposal)
         self.disbursement_history.append(
-            json.dumps(
+            _json_dump(
                 {
                     "type": "tranche_release",
                     "proposal_id": proposal_id,
                     "milestone_id": milestone_id,
                     "amount_usd_cents": release_amount,
                     "arc_tx_hash": arc_tx_hash[:160],
-                },
-                sort_keys=True,
+                }
             )
         )
         return True
@@ -494,56 +723,67 @@ Return JSON only:
     @gl.public.write
     def fund_treasury(self, amount_usd_cents: u256) -> u256:
         self.treasury_balance_usd_cents += int(amount_usd_cents)
-        self.disbursement_history.append(
-            json.dumps({"type": "funding", "amount_usd_cents": int(amount_usd_cents)}, sort_keys=True)
-        )
+        self.disbursement_history.append(_json_dump({"type": "funding", "amount_usd_cents": int(amount_usd_cents)}))
         return self.treasury_balance_usd_cents
 
     @gl.public.write
     def update_threshold(self, new_threshold: u256) -> bool:
-        if gl.message.sender_address != self.owner:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner")
+        self._only_owner()
         self.score_threshold = max(0, min(100, int(new_threshold)))
         return True
 
     @gl.public.write
     def update_mission(self, new_mission: str) -> bool:
-        if gl.message.sender_address != self.owner:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only owner")
+        self._only_owner()
         self.dao_mission = new_mission[:3000]
         return True
 
     @gl.public.write
     def cancel_proposal(self, proposal_id: str) -> bool:
-        if proposal_id not in self.proposals:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Unknown proposal")
-        proposal = self.proposals[proposal_id]
-        if proposal.applicant != gl.message.sender_address.as_hex:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Only applicant")
-        if proposal.status not in ["PENDING_EVALUATION", "PENDING_VOTE"]:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} Proposal cannot be cancelled")
-        proposal.status = "CANCELLED"
-        self.proposals[proposal_id] = proposal
+        proposal = self._get_proposal(proposal_id)
+        if not proposal:
+            raise gl.UserError(f"{ERROR_EXPECTED} Unknown proposal")
+        if proposal.get("applicant") != gl.message.sender_address.as_hex:
+            raise gl.UserError(f"{ERROR_EXPECTED} Only applicant")
+        if proposal.get("status") not in ["PENDING_EVALUATION", "PENDING_VOTE"]:
+            raise gl.UserError(f"{ERROR_EXPECTED} Proposal cannot be cancelled")
+        proposal["status"] = "CANCELLED"
+        self._save_proposal(proposal_id, proposal)
         return True
 
     @gl.public.view
     def get_proposal(self, proposal_id: str) -> dict:
-        if proposal_id not in self.proposals:
-            return {}
-        return self._proposal_to_dict(proposal_id, self.proposals[proposal_id])
+        return self._get_proposal(proposal_id)
 
     @gl.public.view
-    def get_all_proposals(self, status_filter: str = "") -> list[dict]:
-        items: list[dict] = []
+    def get_application_count(self) -> int:
+        return int(self.proposal_nonce)
+
+    @gl.public.view
+    def get_all_proposals(self, status_filter: str = "") -> list:
+        items = []
         for proposal_id in self.proposal_order:
-            proposal = self.proposals[proposal_id]
-            if status_filter and proposal.status != status_filter:
-                continue
-            items.append(self._proposal_to_dict(proposal_id, proposal))
+            proposal = self._get_proposal(proposal_id)
+            if not status_filter or proposal.get("status") == status_filter:
+                items.append(proposal)
         return items
 
     @gl.public.view
-    def get_passed_screening_proposals(self) -> list[dict]:
+    def get_applications_page(self, offset: u256, limit: u256, status_filter: str = "") -> list:
+        items = []
+        start = int(offset)
+        end = start + int(limit)
+        index = 0
+        for proposal_id in self.proposal_order:
+            if index >= start and index < end:
+                proposal = self._get_proposal(proposal_id)
+                if not status_filter or proposal.get("status") == status_filter:
+                    items.append(proposal)
+            index += 1
+        return items
+
+    @gl.public.view
+    def get_passed_screening_proposals(self) -> list:
         return self.get_all_proposals("PENDING_VOTE")
 
     @gl.public.view
@@ -572,66 +812,29 @@ Return JSON only:
 
     @gl.public.view
     def get_member_vote(self, proposal_id: str, member_address: str) -> str:
-        return self.member_votes.get(_vote_key(proposal_id, Address(member_address)), "")
+        return self.member_votes.get(_vote_key(proposal_id, member_address), "")
 
     @gl.public.view
-    def get_my_proposals(self, wallet_address: str) -> list[dict]:
-        items: list[dict] = []
+    def get_my_proposals(self, wallet_address: str) -> list:
+        items = []
+        wallet = _address_text(wallet_address)
         for proposal_id in self.proposal_order:
-            proposal = self.proposals[proposal_id]
-            if proposal.applicant == wallet_address:
-                items.append(self._proposal_to_dict(proposal_id, proposal))
+            proposal = self._get_proposal(proposal_id)
+            if proposal.get("applicant") == wallet:
+                items.append(proposal)
         return items
 
     @gl.public.view
-    def get_disbursement_history(self) -> list[dict]:
-        results: list[dict] = []
+    def get_disbursement_history(self) -> list:
+        results = []
         for item in self.disbursement_history:
-            results.append(_parse_json_dict(item))
+            results.append(_json_load(item, {}))
         return results
 
     @gl.public.view
-    def get_committee_members(self) -> list[str]:
-        items: list[str] = []
+    def get_committee_members(self) -> list:
+        items = []
         for member_address in self.committee_member_order:
             if self.committee_members.get(member_address, False):
                 items.append(member_address)
         return items
-
-
-def test_grant_allocator() -> None:
-    milestones = json.dumps(
-        [
-            {
-                "milestone_id": "ms-1",
-                "title": "Prototype",
-                "description": "Ship the first working release.",
-                "amount_usd_cents": 250000,
-                "status": "PLANNED",
-            }
-        ],
-        sort_keys=True,
-    )
-    contract = GrantAllocatorDAO(
-        "Fund high-impact web3 public goods.",
-        initial_treasury_usd_cents=u256(1_000_000),
-        arc_treasury_address="0xArcTreasury",
-        usdc_token_address="0xUSDC",
-    )
-    contract.set_committee_member(contract.owner.as_hex, True)
-    proposal_id = contract.submit_application(
-        "Ship an indexer",
-        "Build a grants analytics indexer for ecosystem teams.",
-        u256(250000),
-        "Team has shipped data tooling before.",
-        json.dumps({"github": "https://github.com/example"}, sort_keys=True),
-        milestones,
-        json.dumps({"trend": "constructive"}, sort_keys=True),
-        json.dumps({"trust_summary": "clean history"}, sort_keys=True),
-    )
-    proposal = contract.get_proposal(proposal_id)
-    assert proposal["status"] in ["PENDING_VOTE", "REJECTED_BY_AI"]
-
-
-if __name__ == "__main__":
-    test_grant_allocator()
